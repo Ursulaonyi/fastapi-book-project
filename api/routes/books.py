@@ -70,3 +70,5 @@ async def get_book_by_id(book_id: int) -> Book:
     if book is None:
         raise HTTPException(status_code=404, detail="Book not found")
     return book
+
+#End
