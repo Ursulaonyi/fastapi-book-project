@@ -13,53 +13,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # Updated Docker setup step with proper key handling
-      - name: Set up Docker
+      - name: Set up SSH
         run: |
-          sudo apt update
-          sudo apt install -y ca-certificates curl gnupg lsb-release
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 52.91.62.79 >> ~/.ssh/known_hosts
 
-          # Download and dearmor the Docker GPG key
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-          sudo chmod a+r /usr/share/keyrings/docker-archive-keyring.gpg
-
-          # Force using Ubuntu 22.04 (Jammy) repository for Docker
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu jammy stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-          sudo apt update
-          sudo apt install -y docker-ce docker-ce-cli containerd.io
-
-      - name: Log in to Docker Hub
-        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-
-      - name: Build and push Docker image
+      - name: Deploy to EC2
         run: |
-          docker build -t ursulaonyi/fastapi-app .
-          docker push ursulaonyi/fastapi-app
-
-      - name: Test SSH Connection
-        run: |
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > private_key && chmod 600 private_key
-          ssh -v -o StrictHostKeyChecking=no -i private_key ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} "echo 'SSH connection successful'"
-          rm -f private_key
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          SERVER_IP: ${{ secrets.SERVER_IP }}
-          SERVER_USER: ${{ secrets.SERVER_USER }}
-
-      - name: Deploy to server
-        run: |
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > private_key && chmod 600 private_key
-          ssh -o StrictHostKeyChecking=no -i private_key ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
-            docker pull ursulaonyi/fastapi-app:latest
-            docker stop fastapi-app || true
-            docker rm fastapi-app || true
-            docker run -d -p 8000:8000 --name fastapi-app ursulaonyi/fastapi-app:latest
+          ssh ubuntu@52.91.62.79 << 'EOF'
+            export PATH=/bin:/usr/bin:$PATH  # Ensure all commands work
+            
+            # Ensure repo exists
+            if [ ! -d "fastapi-book-project" ]; then
+              git clone https://github.com/Ursulaonyi/fastapi-book-project.git
+            fi
+            
+            cd fastapi-book-project
+            git pull origin main
+            
+            # Restart services
+            docker-compose down
+            docker-compose up -d --build
+            sudo systemctl restart nginx
           EOF
-          rm -f private_key
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          SERVER_IP: ${{ secrets.SERVER_IP }}
-          SERVER_USER: ${{ secrets.SERVER_USER }}
-
-#End
